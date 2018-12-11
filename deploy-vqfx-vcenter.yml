@@ -1,0 +1,214 @@
+###################################################################
+#Script Name	:  Deploy vQFX on vCenter
+#Description	:  Automatic deployment of vQFX on vCenter.
+#Args         :  -k -u <esxi username>
+#Author       	:Casper Krogh, Juniper Networks
+#Email         	:ckrogh@juniper.net
+###################################################################
+
+---
+- hosts: localhost #Playbook runs on localhost
+  vars:
+    src: /var/tmp  # Local source of the .box files.
+    vcenter_ip: x.x.x.x # IP address of vCenter
+    vcenter_username: <username> # Username in vCenter
+    vcenter_password: <password> # Password for vCenter username
+    path: / # Datastore path to put temporary image files. This option puts them in the root of the provided datastore. The temporary imagefiles will be deleted after conversion.
+    datacenter: <datacenter> # vCenter datacenter
+    cluster_name: ck-cluster # vCenter cluster
+    datastore: <datastore name> # Name of datastore to create VMs on
+    folder_name: / # Name of the folder to create VMs in. Set this to "/" to create in the root.
+    esxi_ip: <esxi ip> # ESXi host to create vSwitch, portgroup and convert vmdk files on (dVswitches not supported yet)
+    esxi_username: <esxi username> # ESXI username
+    esxi_password: <password> # ESXi password
+    vswitch_name: vQFX-vSwitch # Name of vSwitch to be created on ESXi host.
+    portgroup_name: vQFX-internal-{{ re_vm_name }}-{{ pfe_vm_name }} # Name of portgroup to be created on ESXi host. One portgroup per vQFX (RE vm + PFE vm)
+    re_vm_name: <VM name of RE VM> # RE VM name
+    pfe_vm_name: <VM name of PFE VM> # PFE VM name
+    mgmt_network_name: <MGMT network> # Existing portgroup to mgmt interface.
+    validate_sslcerts: False # If using self-signed/untrusted certificates for vCenter, set this to False
+
+
+  tasks:
+  - name: Search path for vQFX media
+    find:
+      paths: "{{ src }}"
+      patterns: "*.box"
+    register: find_results
+
+  - name: Fail if files are not found
+    fail:
+      msg: ".box files not found in {{ src }} - Put them in /var/tmp or run playbook with -e src=/path/to/files"
+    when: find_results.matched == 0
+
+  - name: Extract RE VMDK from Virtualbox file
+    unarchive:
+      src: "{{ src }}/{{ item | basename }}"
+      dest: "{{ src }}"
+      list_files: yes
+      copy: no
+    with_fileglob:
+      - "{{ src }}/*re*.box"
+
+  - name: Rename RE vmdk file
+    command: mv {{ src }}/{{ item | basename }} {{ src }}/box-temp-re-vmdk.RE
+    with_fileglob: "{{ src }}/*.vmdk"
+
+
+  - name: Copy RE .vmdk files to esxi host
+    vsphere_copy:
+      datacenter: "{{ datacenter }}"
+      datastore: "{{ datastore }}"
+      host: "{{ vcenter_ip }}"
+      login: "{{ vcenter_username }}"
+      password: "{{ vcenter_password }}"
+      src: "{{ item }}"
+      path: "{{ path }}/{{ item | basename }}"
+      validate_certs: "{{ validate_sslcerts }}"
+    with_fileglob:
+      - "{{ src }}/*.RE"
+
+  - name: Add vQFX vSwitch
+    vmware_vswitch:
+      esxi_hostname: "{{ esxi_ip }}"
+      hostname: "{{ vcenter_ip }}"
+      username: "{{ vcenter_username }}"
+      password: "{{ vcenter_password }}"
+      mtu: 9000
+      switch: "{{ vswitch_name }}"
+      validate_certs: "{{ validate_sslcerts }}"
+
+  - name: Add vSwitch portgroup
+    vmware_portgroup:
+      hostname: "{{ vcenter_ip }}"
+      username: "{{ vcenter_username }}"
+      password: "{{ vcenter_password }}"
+      switch_name: "{{ vswitch_name }}"
+      hosts: "{{ esxi_ip }}"
+      portgroup_name: "{{ portgroup_name }}"
+      vlan_id: 0
+      validate_certs: "{{ validate_sslcerts }}"
+      network_policy:
+        promiscuous_mode: True
+
+  - name: Create vQFX-RE
+    vmware_guest:
+      hostname: "{{ vcenter_ip }}"
+      username: "{{ vcenter_username }}"
+      password: "{{ vcenter_password }}"
+      validate_certs: False
+      datacenter: "{{ datacenter }}"
+      folder: "{{ folder_name }}"
+      name: "{{ re_vm_name }}"
+      state: poweredoff
+      guest_id: freebsd64Guest
+      datastore: "{{ datastore }}"
+      hardware:
+        memory_mb: 1024
+        num_cpus: 1
+        nested_virt: yes
+        scsi: lsilogic
+        version: 10
+      networks:
+      - name: "{{ mgmt_network_name }}"
+        device_type: e1000
+      - name: "{{ portgroup_name }}"
+        device_type: e1000
+    delegate_to: localhost
+
+  - name: Create vQFX-PFE
+    vmware_guest:
+      hostname: "{{ vcenter_ip }}"
+      username: "{{ vcenter_username }}"
+      password: "{{ vcenter_password }}"
+      validate_certs: False
+      datacenter: "{{ datacenter }}"
+      folder: "{{ folder_name }}"
+      name: "{{ pfe_vm_name }}"
+      state: poweredoff
+      guest_id: Ubuntu64guest
+      datastore: "{{ datastore }}"
+      hardware:
+        memory_mb: 2048
+        num_cpus: 1
+        nested_virt: yes
+        scsi: lsilogic
+        version: 10
+      networks:
+      - name: "{{ mgmt_network_name }}"
+        device_type: e1000
+      - name: "{{ portgroup_name }}"
+        device_type: e1000
+
+    delegate_to: localhost
+
+  - name: Run vmkfstools on RE vmdk
+    shell: |
+      vmkfstools -i /vmfs/volumes/{{ datastore }}/{{ path }}/{{ item | basename }} /vmfs/volumes/{{ datastore }}/{{ re_vm_name }}/{{ re_vm_name }}.vmdk -d thin
+      vmkfstools -U /vmfs/volumes/{{ datastore }}/{{ path }}/{{ item | basename }}
+    with_fileglob:
+      - "{{ src }}/*.RE"
+    delegate_to: "{{ esxi_ip }}"
+
+
+  - name: Extract PFE VMDK from Virtualbox file
+    unarchive:
+      src: "{{ src }}/{{ item | basename }}"
+      dest: "{{ src }}"
+      list_files: yes
+    with_fileglob:
+      - "{{ src }}/*pfe*.box"
+
+  - name: Rename PFE vmdk file
+    command: mv {{ src }}/{{ item | basename }} {{ src }}/box-temp-re-vmdk.PFE
+    with_fileglob: "{{ src }}/*.vmdk"
+
+  - name: Copy PFE .vmdk files to vCenter/esxi host
+    vsphere_copy:
+      datacenter: "{{ datacenter }}"
+      datastore: "{{ datastore }}"
+      host: "{{ vcenter_ip }}"
+      login: "{{ vcenter_username }}"
+      password: "{{ vcenter_password }}"
+      src: "{{ item }}"
+      path: "{{ path }}/{{ item | basename }}"
+      validate_certs: "{{ validate_sslcerts }}"
+    with_fileglob:
+      - "{{ src }}/*.PFE"
+
+
+  - name: Run vmkfstools on PFE vmdk
+    shell: |
+      vmkfstools -i /vmfs/volumes/{{ datastore }}/{{ path }}/{{ item | basename }} /vmfs/volumes/{{ datastore }}/{{ pfe_vm_name }}/{{ pfe_vm_name }}.vmdk -d thin
+      vmkfstools -U /vmfs/volumes/{{ datastore }}/{{ path }}/{{ item | basename }}
+    with_fileglob:
+      - "{{ src }}/*.PFE"
+    delegate_to: "{{ esxi_ip }}"
+
+  - name: Add RE vmdk
+    when: not validate_sslcerts
+    script: add_existing_vmdk.py -s {{ vcenter_ip }} -u {{ vcenter_username }} -p {{ vcenter_password }} --insecure -vmname {{ re_vm_name }} -vmdkpath "[{{ datastore }}] {{ re_vm_name }}/{{ re_vm_name }}.vmdk"
+
+  - name: Add PFE vmdk
+    when: not validate_sslcerts
+    script: add_existing_vmdk.py -s {{ vcenter_ip }} -u {{ vcenter_username }} -p {{ vcenter_password }} --insecure -vmname {{ pfe_vm_name }} -vmdkpath "[{{ datastore }}] {{ pfe_vm_name }}/{{ pfe_vm_name }}.vmdk"
+
+  - name: Add RE vmdk (SSL connection)
+    when: validate_sslcerts
+    script: add_existing_vmdk.py -s {{ vcenter_ip }} -u {{ vcenter_username }} -p {{ vcenter_password }} -vmname {{ re_vm_name }} -vmdkpath "[{{ datastore }}] {{ re_vm_name }}/{{ re_vm_name }}.vmdk"
+
+  - name: Add PFE vmdk (SSL connection)
+    when: validate_sslcerts
+    script: add_existing_vmdk.py -s {{ vcenter_ip }} -u {{ vcenter_username }} -p {{ vcenter_password }} -vmname {{ pfe_vm_name }} -vmdkpath "[{{ datastore }}] {{ pfe_vm_name }}/{{ pfe_vm_name }}.vmdk"
+
+  - name: Power on VMs
+    vmware_guest_powerstate:
+      hostname: "{{ vcenter_ip }}"
+      username: "{{ vcenter_username }}"
+      password: "{{ vcenter_password }}"
+      state: powered-on
+      name: "{{ item }}"
+      validate_certs: "{{ validate_sslcerts }}"
+    loop:
+      - "{{ re_vm_name }}"
+      - "{{ pfe_vm_name }}"
