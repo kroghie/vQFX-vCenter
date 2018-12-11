@@ -8,10 +8,11 @@ Requirements:
 - Ansible 2.7.2
 - vQFX downloaded from https://www.juniper.net/us/en/dm/free-vqfx-trial/ - This is verified with vQFX 17.4 Vagrant
 - vCenter
+- Python and pyVmomi installed (https://pypi.org/project/pyvmomi/)
 
 Instructions:
 
-1) Install Ansible using your favorite tool
+1) Install Ansible, python and pyVmomi using your favorite tool
 2) Download vQFX Vagrantbox files from above link to /var/tmp. If /var/tmp is not prefereable, edit the vars in deploy-vqfx-vcenter to match the location of .box files
 3) Edit the variables in the playbook to match your enviroment.
 4) Run the ansible playbook with the mandatory parameters -k and -u: `ansible-playbook deploy-vqfx-vcenter.yml -k -u <esxiusername>` - Type in the password for the esxi user when prompted. 
