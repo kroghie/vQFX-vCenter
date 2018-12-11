@@ -19,6 +19,8 @@ Instructions:
 **If you dont provide -k and -u, Ansible will default to using SSH keys and will fail to run correctly, unless you have SSH keys setup to the given ESXi host**
 
 
+Two VMs are now deployed to your vCenter with the correct settings and are powered on. Check that everything is working by logging into the RE VM (Default username/password: root/Juniper) and running `ping 169.254.0.1` and `show interfaces terse`. The ping should be successfull and you should see a lot of xe-0/0/x interfaces. To add revenue interfaces to the vQFX, add more vNICs to the RE VM (type: e1000) and connect them to the desired networks.
+
 **Tip:**
 use -e "key=value" for providing other values for keys instead of editing the playbook everytime.
 E.g: `ansible-playbook deploy-vqfx-vcenter.yml -k -u root -e "re_vm_name=vQFX-02"`
