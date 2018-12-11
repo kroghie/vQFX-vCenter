@@ -74,6 +74,18 @@ def add_disk(vm, service_instance):
   vm.ReconfigVM_Task(spec=spec)
   print (controller)
 
+def get_obj(content, vimtype, name):
+    """
+    Get the vsphere object associated with a given text name
+    """
+    obj = None
+    container = content.viewManager.CreateContainerView(content.rootFolder, vimtype, True)
+    for c in container.view:
+        if c.name == name:
+            obj = c
+            break
+    return obj
+
 def main():
 
 #Check SSL options and connect to vCenter
@@ -85,17 +97,8 @@ def main():
     else:
         service_instance = SmartConnect(host=args.host, user=args.user, pwd=args.password, port=int(args.port))
 
-
-
-  #Get VM
-    alldc = service_instance.content.rootFolder.childEntity
-    searchIndex = service_instance.content.searchIndex
-    for dc in alldc:
-        vm = searchIndex.FindChild(dc.vmFolder, args.vmname)
-        if vm is None:
-            raise Exception("VM %s not found" % vmname)
-
 #Add disk
+    vm = get_obj(service_instance.RetrieveContent(), [vim.VirtualMachine], args.vmname)
     add_disk(vm, service_instance)
 
 # Start program
