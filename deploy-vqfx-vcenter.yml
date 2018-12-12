@@ -15,7 +15,7 @@
     vcenter_password: <password> # Password for vCenter username
     path: / # Datastore path to put temporary image files. This option puts them in the root of the provided datastore. The temporary imagefiles will be deleted after conversion.
     datacenter: <datacenter> # vCenter datacenter
-    cluster_name: <cluster name> # vCenter cluster.
+    cluster: <cluster name> # vCenter cluster.
     datastore: <datastore name> # Name of datastore to create VMs on
     folder_name: / # Name of the folder to create VMs in. Set this to "/" to create in the root.
     esxi_ip: <esxi ip> # ESXi host to create vSwitch, portgroup and convert vmdk files on (dVswitches not supported yet)
